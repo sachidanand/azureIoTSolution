@@ -1,0 +1,137 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "hubName": {
+      "type": "string"
+    },
+    "retentionTimeInDays": {
+      "type": "int",
+      "defaultValue": 1
+    },
+    "partitionCount": {
+      "type": "int",
+      "defaultValue": 4
+    },
+    "partitionIds": {
+      "type": "array",
+      "defaultValue": [ "0", "1", "2", "3" ]
+    },
+    "storageAccountType": {
+      "type": "string",
+      "defaultValue": "Standard_RAGRS",
+      "allowedValues": [
+        "Standard_LRS",
+        "Standard_GRS",
+        "Standard_RAGRS"
+      ],
+      "metadata": {
+        "description": "Storage Account type"
+      }
+    }
+  },
+  "variables": {
+    "location": "[resourceGroup().location]",
+
+    "IotHubFileStorage": "[concat('filesrawsa', uniqueString(resourceGroup().id, parameters('hubName')))]",
+    "apiVersion": "2016-02-03",
+    "iotHubPolicyName": "iothubowner"
+  },
+  "resources": [
+    {
+      "apiVersion": "2016-01-01",
+      "type": "Microsoft.Storage/storageAccounts",
+      "name": "[variables('IotHubFileStorage')]",
+      "location": "[variables('location')]",
+      "kind": "Storage",
+      "sku": {
+        "name": "[parameters('storageAccountType')]"
+      }
+    },
+    {
+      "apiVersion": "2016-02-03",
+      "type": "Microsoft.Devices/IotHubs",
+      "name": "[parameters('hubName')]",
+      "location": "[variables('location')]",
+      "sku": {
+        "name": "S1",
+        "tier": "Standard",
+        "capacity": 1
+      },
+      "dependsOn": [
+        "[concat('Microsoft.Storage/storageAccounts/', variables('IotHubFileStorage'))]"
+      ],
+      "properties": {
+        "location": "[variables('location')]",
+        "ipFilterRules": [],
+        "eventHubEndpoints": {
+          "events": {
+            "retentionTimeInDays": "[parameters('retentionTimeInDays')]",
+            "partitionCount": "[parameters('partitionCount')]",
+            "partitionIds": "[parameters('partitionIds')]",
+            "path": "[parameters('hubName')]",
+            "endpoint": "[concat('sb://iothub-ns-', parameters('hubName'),'-132733-4d0b174fe6.servicebus.windows.net/')]"
+          },
+          "operationsMonitoringEvents": {
+            "retentionTimeInDays": "[parameters('retentionTimeInDays')]",
+            "partitionCount": "[parameters('partitionCount')]",
+            "partitionIds": "[parameters('partitionIds')]",
+            "path": "[concat(parameters('hubName'),'-operationmonitoring')]",
+            "endpoint": "[concat('sb://iothub-ns-', parameters('hubName'),'-132733-4d0b174fe6.servicebus.windows.net/')]"
+          }
+        },
+        "storageEndpoints": {
+          "$default": {
+            "sasTtlAsIso8601": "PT1H",
+            "connectionString": "[concat('DefaultEndpointsProtocol=https;AccountName=', variables('IotHubFileStorage'), ';AccountKey=', listKeys(concat('Microsoft.Storage/storageAccounts/', variables('IotHubFileStorage')),  providers('Microsoft.Storage', 'storageAccounts').apiVersions[0]).keys[0].value)]",
+            "containerName": "configfiles"
+          }
+        },
+        "routing": {
+          "endpoints": {
+            "serviceBusQueues": [],
+            "serviceBusTopics": [],
+            "eventHubs": []
+          },
+          "routes": [],
+          "fallbackRoute": {
+            "name": "$fallback",
+            "source": "DeviceMessages",
+            "condition": "true",
+            "endpointNames": [
+              "events"
+            ],
+            "isEnabled": true
+          }
+        },
+        "enableFileUploadNotifications": true
+      }
+    },
+    {
+      "apiVersion": "2016-02-03",
+      "type": "Microsoft.Devices/IotHubs/eventhubEndpoints/ConsumerGroups",
+      "name": "[concat(parameters('hubName'), '/events/rawstorecg')]",
+      "dependsOn": [
+        "[concat('Microsoft.Devices/Iothubs/', parameters('hubName'))]"
+      ]
+    },
+    {
+      "apiVersion": "2016-02-03",
+      "type": "Microsoft.Devices/IotHubs/eventhubEndpoints/ConsumerGroups",
+      "name": "[concat(parameters('hubName'), '/events/payloadadaptorcg')]",
+      "dependsOn": [
+        "[concat('Microsoft.Devices/Iothubs/', parameters('hubName'))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "hubKey": {
+      "value": "[concat('Endpoint=',reference(resourceId('Microsoft.Devices/IoTHubs',parameters('hubName'))).eventHubEndpoints.events.endpoint,';SharedAccessKeyName=',variables('iotHubPolicyName'),';SharedAccessKey=',listKeys(resourceId('Microsoft.Devices/IotHubs/Iothubkeys', parameters('hubName'),variables('iotHubPolicyName')), variables('apiVersion')).primaryKey)]",
+      "type": "string"
+    },
+    "iotHubConnectionString": {
+      "value": "[concat('HostName=', parameters('hubName'), '.azure-devices.net;SharedAccessKeyName=iothubowner;SharedAccessKey=', listKeys(resourceId('Microsoft.Devices/IotHubs/Iothubkeys', parameters('hubName'), 'iothubowner'), '2016-02-03').primaryKey)]",
+      "type": "string"
+    }
+  }
+}
